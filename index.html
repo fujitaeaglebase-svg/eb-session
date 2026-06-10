@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>日報セッション抽出</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>body { margin: 0; background: #f8fafc; }</style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState } = React;
+
+    function parse(text) {
+      const map = {};
+      const toNum = d => { const [m, d2] = d.split("/").map(Number); return m * 100 + d2; };
+
+      function parseSales(block) {
+        const sales = {};
+        const m = block.match(/【売上】([\s\S]*?)(?=【清掃】|【レビュー|【その他|【物販】|$)/);
+        if (!m) return sales;
+        m[1].split("\n").forEach(line => {
+          const r = line.match(/[・]?(.+?)様\s+(.+)/);
+          if (r) sales[r[1].trim()] = r[2].trim();
+        });
+        return sales;
+      }
+
+      text.split(/(?=【担当】)/).forEach(block => {
+        const dateM = block.match(/【日付】([^\n]+)/);
+        const sessM = block.match(/【日付】[^\n]+\n([\s\S]*?)(?=【体験】)/);
+        if (!dateM || !sessM) return;
+        const date = dateM[1].trim().replace(/[（(][^）)]*[）)]/g, "").trim();
+        const sales = parseSales(block);
+        sessM[1].split("\n").forEach(line => {
+          const m = line.match(/^・(.+?)様?\s*(\d+)\/(\d+)/);
+          if (!m) return;
+          const name = m[1].replace(/様$/, "").trim();
+          const note = [
+            (line.match(/[（(]([^）)]+)[）)]/) || [])[1] || "",
+            (line.match(/※(.+)/) || [])[1] || ""
+          ].filter(Boolean).join(" ").replace(/当日CXL/g, "").trim();
+          if (!map[name]) map[name] = [];
+          map[name].push({ date, done: +m[2], total: +m[3], cancelled: /CXL|キャンセル/.test(line), retired: /退会/.test(line), note, sales: sales[name] || "" });
+        });
+      });
+
+      Object.keys(map).forEach(k => map[k].sort((a, b) => toNum(a.date) - toNum(b.date)));
+      return Object.entries(map).sort((a, b) => a[0].localeCompare(b[0], "ja"));
+    }
+
+    function App() {
+      const [input, setInput] = useState("");
+      const [clients, setClients] = useState(null);
+      const [error, setError] = useState("");
+
+      const extract = () => {
+        const result = parse(input);
+        if (!result.length) { setError("日報が見つかりませんでした。"); return; }
+        setError("");
+        setClients(result);
+      };
+
+      return (
+        <div style={{ fontFamily: "sans-serif", maxWidth: 720, margin: "0 auto", padding: 20, color: "#1e293b" }}>
+          <div style={{ display:"flex", alignItems:"center", gap: 12, marginBottom: 4 }}>
+            <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAbEAAAJBCAYAAADIqos1AAAAAXNSR0IArs4c6QAAAERlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAABAAEAAKACAAQAAAABAAABsaADAAQAAAABAAACQQAAAACANbIyAABAAElEQVR4Aey9e6x2SXbedS7ftbvn1h6PZ3yPPbZjbMcQm2Bjhz8Qlz9iIwgEFDkJMQhzMUiICCEQ4A5SwP9EEUGONBaSUYRAeBAIrIBQYk0MticG2xOP7bl4fJvpmZ5LT9ye6dvX3+1Qq2r/dj279uvtQ8jX83t/37fWXs/a56mqc25Vvb+zz7nvOefcc849N7LH2dnZsf1z7qPIp5izs6NFjsZ9u8d3dnSU9JdcPTy8a3Fw2B7e/FEs8sFldm0" alt="EAGLE BASE" style={{ height: 52, objectFit:"contain" }} />
+            <div>
+              <div style={{ fontSize: 20, fontWeight: "bold", letterSpacing: 2, color:"#1a1a1a" }}>EAGLE BASE</div>
+              <div style={{ fontSize: 11, letterSpacing: 3, color:"#666" }}>PERSONAL TRAINING GYM</div>
+            </div>
+          </div>
+          <p style={{ color: "#64748b", fontSize: 13, marginBottom: 16 }}>複数日の日報をまとめて貼り付けてください</p>
+          <textarea
+            value={input} onChange={e => setInput(e.target.value)}
+            placeholder="日報テキストをここに貼り付けてください..." rows={8}
+            style={{ width: "100%", boxSizing: "border-box", padding: 10, border: "1.5px solid #cbd5e1", borderRadius: 10, fontSize: 13, resize: "vertical", outline: "none", marginBottom: 8 }}
+          />
+          <button onClick={extract} disabled={!input.trim()} style={{
+            width: "100%", padding: 11, borderRadius: 10, border: "none",
+            background: !input.trim() ? "#94a3b8" : "#6366f1",
+            color: "white", fontWeight: "bold", fontSize: 14,
+            cursor: !input.trim() ? "not-allowed" : "pointer", marginBottom: 8
+          }}>✨ 抽出する</button>
+
+          {error && <p style={{ color: "#dc2626", fontSize: 13 }}>{error}</p>}
+
+          {clients && (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+                <span style={{ fontWeight: "bold" }}>{clients.length}名のセッション</span>
+                <span style={{ fontSize: 12, color: "#64748b" }}>合計 {clients.reduce((a, [, s]) => a + s.length, 0)} 件</span>
+              </div>
+              {clients.map(([name, sessions], i) => {
+                const latest = sessions[sessions.length - 1];
+                const cancelled = sessions.filter(s => s.cancelled).length;
+                const retired = sessions.some(s => s.retired);
+                return (
+                  <div key={i} style={{ border: "1.5px solid #e2e8f0", borderRadius: 12, overflow: "hidden", marginBottom: 14 }}>
+                    <div style={{ padding: "9px 14px", background: "#f1f5f9", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        <span style={{ fontWeight: "bold", fontSize: 15 }}>👤 {name}</span>
+                        {retired && <span style={{ fontSize: 10, background: "#fee2e2", color: "#dc2626", borderRadius: 10, padding: "1px 6px" }}>退会</span>}
+                        {cancelled > 0 && <span style={{ fontSize: 10, background: "#fef3c7", color: "#b45309", borderRadius: 10, padding: "1px 6px" }}>CXL {cancelled}件</span>}
+                      </div>
+                      <span style={{ fontSize: 13, color: "#6366f1", fontWeight: "bold" }}>{latest.done}/{latest.total}</span>
+                    </div>
+                    <div style={{ padding: "8px 14px" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                        <thead>
+                          <tr style={{ color: "#94a3b8", fontSize: 11 }}>
+                            <th style={{ textAlign: "left", padding: "2px 8px 6px 0" }}>日付</th>
+                            <th style={{ textAlign: "left", padding: "2px 8px 6px 0" }}>回数</th>
+                            <th style={{ textAlign: "left", padding: "2px 8px 6px 0" }}>状態</th>
+                            <th style={{ textAlign: "left", padding: "2px 8px 6px 0" }}>メモ</th>
+                            <th style={{ textAlign: "left", padding: "2px 0 6px 0" }}>売上</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sessions.map((s, j) => (
+                            <tr key={j} style={{ borderTop: j > 0 ? "1px solid #f1f5f9" : "none" }}>
+                              <td style={{ padding: "4px 8px 4px 0", color: "#475569" }}>{s.date}</td>
+                              <td style={{ padding: "4px 8px 4px 0", fontWeight: "600" }}>{s.done}/{s.total}</td>
+                              <td style={{ padding: "4px 8px 4px 0" }}>
+                                {s.cancelled ? <span style={{ color: "#f59e0b" }}>❌CXL</span>
+                                  : s.retired ? <span style={{ color: "#dc2626" }}>🔴退会</span>
+                                  : <span style={{ color: "#10b981" }}>✅</span>}
+                              </td>
+                              <td style={{ padding: "4px 8px 4px 0", color: "#94a3b8", fontSize: 12 }}>{s.note}</td>
+                              <td style={{ padding: "4px 0", color: "#0ea5e9", fontSize: 12 }}>{s.sales}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
